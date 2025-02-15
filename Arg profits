@@ -1,0 +1,56 @@
+<!-- MR ARG PROFITS - Deriv Binary Bot XML Script with Martingale Strategy -->
+<xml xmlns="http://www.w3.org/1999/xhtml">
+  <block type="trade_definition" id="trade">
+    <field name="CONTRACT_TYPE">DIGITOVER</field>
+    <field name="MARKET">R_100</field>
+    <field name="SUBMARKET">indices</field>
+    <field name="CURRENCY">USD</field>
+    <value name="AMOUNT">
+      <block type="math_number">
+        <field name="NUM">1</field>
+      </block>
+    </value>
+  </block>
+  
+  <!-- Check last 2 digits -->
+  <block type="if_then" id="check_digits">
+    <value name="IF">
+      <block type="logic_compare">
+        <field name="OP">AND</field>
+        <value name="A">
+          <block type="math_number">
+            <field name="NUM">2</field>
+          </block>
+        </value>
+        <value name="B">
+          <block type="math_number">
+            <field name="NUM">8</field>
+          </block>
+        </value>
+      </block>
+    </value>
+    <statement name="DO">
+      <block type="trade_all time"></block>
+    </statement>
+  </block>
+  
+  <!-- Martingale Strategy -->
+  <block type="variables_set" id="martingale">
+    <field name="VAR">stake</field>
+    <value name="VALUE">
+      <block type="math_arithmetic">
+        <field name="OP">MULTIPLY</field>
+        <value name="A">
+          <block type="variables_get">
+            <field name="VAR">stake</field>
+          </block>
+        </value>
+        <value name="B">
+          <block type="math_number">
+            <field name="NUM">2</field>
+          </block>
+        </value>
+      </block>
+    </value>
+  </block>
+</xml>
