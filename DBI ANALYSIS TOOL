@@ -1,0 +1,164 @@
+import requests
+import pandas as pd
+import time
+import logging
+import smtplib
+import threading
+import plotly.graph_objs as go
+import plotly.io as pio
+import telegram
+from flask import Flask, jsonify, render_template
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from talib import RSI, MACD, BBANDS
+
+# Dbi Analysis Tool - Connects with Deriv API
+
+# Configure logging
+logging.basicConfig(filename='trading_log.txt', level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Configure Flask Web Dashboard
+app = Flask(__name__)
+market_data = []
+trade_history = []
+balance = 1000  # Starting paper money
+position = 0  # No open positions initially
+starting_balance = balance
+
+# Risk Management Settings
+STOP_LOSS = 50  # Stop-loss amount
+TAKE_PROFIT = 100  # Take-profit amount
+
+# Configure Telegram Bot
+TELEGRAM_BOT_TOKEN = "your_telegram_bot_token"
+TELEGRAM_CHAT_ID = "your_telegram_chat_id"
+bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
+
+# Configure Email Notifications
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+EMAIL_SENDER = "your_email@gmail.com"
+EMAIL_PASSWORD = "your_email_password"
+EMAIL_RECEIVER = "receiver_email@gmail.com"
+
+# Deriv API Configuration
+DERIV_API_URL = "https://api.deriv.com/v2/trade"
+DERIV_API_TOKEN = "your_deriv_api_token"
+DERIV_ACCOUNT_ID = "your_deriv_account_id"
+
+headers = {
+    "Authorization": f"Bearer {DERIV_API_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+def send_email(subject, message):
+    """Send email notification."""
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_SENDER
+    msg['To'] = EMAIL_RECEIVER
+    msg['Subject'] = subject
+    msg.attach(MIMEText(message, 'plain'))
+    
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
+        server.quit()
+    except Exception as e:
+        logging.error(f"Failed to send email: {e}")
+
+def send_telegram_message(message):
+    """Send trade notifications via Telegram."""
+    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+
+def fetch_market_data():
+    """Fetch real-time market data from Deriv API."""
+    response = requests.get("https://api.deriv.com/v3/price?symbol=R_100")
+    if response.status_code == 200:
+        data = response.json()
+        return {
+            "timestamp": data["time"],
+            "price": float(data["price"])
+        }
+    return None
+
+def analyze_market(data):
+    """Apply technical indicators to generate trade signals."""
+    df = pd.DataFrame(data)
+    df["rsi"] = RSI(df["price"], timeperiod=14)
+    df["macd"], df["macd_signal"], _ = MACD(df["price"], fastperiod=12, slowperiod=26, signalperiod=9)
+    df["upper_band"], df["middle_band"], df["lower_band"] = BBANDS(df["price"], timeperiod=20)
+    
+    latest = df.iloc[-1]
+    if latest["rsi"] < 30 and latest["price"] < latest["lower_band"]:
+        return "BUY"
+    elif latest["rsi"] > 70 and latest["price"] > latest["upper_band"]:
+        return "SELL"
+    return "HOLD"
+
+def execute_trade(signal):
+    """Execute trade on Deriv API with risk management."""
+    global balance, position
+    trade_data = {
+        "account": DERIV_ACCOUNT_ID,
+        "market": "R_100",
+        "action": "BUY" if signal == "BUY" else "SELL",
+        "amount": 100
+    }
+    
+    if balance - trade_data["amount"] < starting_balance - STOP_LOSS:
+        logging.info("Trade not executed due to stop-loss limit.")
+        return
+    if balance + trade_data["amount"] > starting_balance + TAKE_PROFIT:
+        logging.info("Trade not executed due to take-profit limit.")
+        return
+    
+    response = requests.post(DERIV_API_URL, headers=headers, json=trade_data)
+    if response.status_code == 200:
+        logging.info(f"Trade executed: {trade_data}")
+        send_telegram_message(f"Trade executed: {trade_data}")
+        send_email("Trade Execution", f"Trade executed successfully: {trade_data}")
+    else:
+        logging.error(f"Trade failed: {response.text}")
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/data')
+def data():
+    return jsonify({"balance": balance, "position": position, "trade_history": trade_history, "market_data": market_data})
+
+if __name__ == "__main__":
+    from waitress import serve
+    threading.Thread(target=execute_trade, args=("BUY",)).start()
+    serve(app, host='0.0.0.0', port=5000)
+version: '3.8'
+
+services:
+  dbi_analysis_tool:
+    build: .
+    container_name: dbi_analysis_tool
+    ports:
+      - "5000:5000"
+    environment:
+      - TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+      - TELEGRAM_CHAT_ID=your_telegram_chat_id
+      - EMAIL_SENDER=your_email@gmail.com
+      - EMAIL_PASSWORD=your_email_password
+      - EMAIL_RECEIVER=receiver_email@gmail.com
+      - DERIV_API_TOKEN=your_deriv_api_token
+      - DERIV_ACCOUNT_ID=your_deriv_account_id
+    restart: always
+FROM python:3.9
+
+WORKDIR /app
+
+COPY requirements.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+CMD ["python", "your_script.py"]
